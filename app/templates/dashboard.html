@@ -490,13 +490,20 @@
             <label><span>用途说明</span><input name="description" placeholder="这条命令会检查什么" /></label>
           </div>
           <label><span>Shell 命令</span><textarea name="command" rows="5" placeholder="nvidia-smi" required></textarea></label>
+          <label class="toggle-row">
+            <div>
+              <strong>适用于全部服务器</strong>
+              <span>勾选后，这条命令会对当前和未来新增的所有服务器生效。</span>
+            </div>
+            <input id="command-scope-all" name="scope_all_servers" type="checkbox" />
+          </label>
 
           <div class="form-grid two-columns">
-            <section class="selector-panel">
+            <section id="command-server-panel" class="selector-panel">
               <div class="subsection-head"><strong>指定服务器</strong><span>可单选，也可多选</span></div>
               <div id="command-server-targets" class="selector-list"></div>
             </section>
-            <section class="selector-panel">
+            <section id="command-tag-panel" class="selector-panel">
               <div class="subsection-head"><strong>指定标签</strong><span>所有带这些标签的服务器都会生效</span></div>
               <div id="command-tag-targets" class="selector-list"></div>
               <label><span>补充标签</span><input name="tags" placeholder="可手动输入多个标签，用逗号分隔" /></label>
