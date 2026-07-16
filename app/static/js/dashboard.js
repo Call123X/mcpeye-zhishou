@@ -114,9 +114,10 @@ function applicableCommandsForServer(serverId) {
 }
 
 function commandSummary(command) {
+  const all = command.scope_all_servers ? "全部服务器" : "";
   const direct = command.server_names?.length ? `${command.server_names.length} 台服务器` : "";
   const tags = command.tags?.length ? `${command.tags.length} 个标签` : "";
-  return [direct, tags].filter(Boolean).join(" / ") || "未分配范围";
+  return [all, direct, tags].filter(Boolean).join(" / ") || "未分配范围";
 }
 
 function renderOverviewServerOptions() {
@@ -508,7 +509,9 @@ function renderCommandDetail() {
   document.getElementById("command-detail-name").textContent = command.name;
   document.getElementById("command-detail-description").textContent = command.description || "未填写用途说明";
   document.getElementById("command-detail-command").textContent = command.command || "-";
-  document.getElementById("command-detail-targets").innerHTML = renderTokenList(command.server_names || [], "未直接指定服务器");
+  document.getElementById("command-detail-targets").innerHTML = command.scope_all_servers
+    ? '<span class="token-chip">全部服务器</span>'
+    : renderTokenList(command.server_names || [], "未直接指定服务器");
   document.getElementById("command-detail-tags").innerHTML = renderTokenList(command.tags || [], "未设置标签范围");
   document.getElementById("command-detail-applicable").innerHTML = (command.applicable_servers || []).length
     ? command.applicable_servers.map((server) => `<span class="token-chip">${escapeHtml(server.name)}</span>`).join("")
@@ -583,6 +586,24 @@ function renderTagTargetSelectors(selectedTags) {
     .join("");
 }
 
+function syncCommandScopeUi() {
+  const checked = Boolean(commandForm?.elements.scope_all_servers?.checked);
+  const serverPanel = document.getElementById("command-server-panel");
+  const tagPanel = document.getElementById("command-tag-panel");
+  if (serverPanel) {
+    serverPanel.classList.toggle("disabled-panel", checked);
+  }
+  if (tagPanel) {
+    tagPanel.classList.toggle("disabled-panel", checked);
+  }
+  document.querySelectorAll('input[name="command_server_ids"], input[name="command_tag_names"]').forEach((input) => {
+    input.disabled = checked;
+  });
+  if (commandForm?.elements.tags) {
+    commandForm.elements.tags.disabled = checked;
+  }
+}
+
 function openCommandModal(command = null) {
   fillCommandForm(command);
   document.getElementById("command-modal").hidden = false;
@@ -599,10 +620,12 @@ function fillCommandForm(command) {
 
   if (!command) {
     commandForm.elements.command_id.value = "";
+    commandForm.elements.scope_all_servers.checked = false;
     document.getElementById("command-modal-title").textContent = "新增巡检命令";
     document.getElementById("delete-command-modal-button").disabled = true;
     renderServerTargetSelectors([]);
     renderTagTargetSelectors([]);
+    syncCommandScopeUi();
     return;
   }
 
@@ -610,6 +633,7 @@ function fillCommandForm(command) {
   commandForm.elements.name.value = command.name;
   commandForm.elements.description.value = command.description || "";
   commandForm.elements.command.value = command.command;
+  commandForm.elements.scope_all_servers.checked = Boolean(command.scope_all_servers);
 
   const knownTagKeys = new Set(state.serverTags.map((tag) => tag.toLowerCase()));
   const manualTags = (command.tags || []).filter((tag) => !knownTagKeys.has(tag.toLowerCase()));
@@ -617,6 +641,7 @@ function fillCommandForm(command) {
 
   renderServerTargetSelectors(command.server_ids || []);
   renderTagTargetSelectors(command.tags || []);
+  syncCommandScopeUi();
   document.getElementById("command-modal-title").textContent = `编辑 ${command.name}`;
   document.getElementById("delete-command-modal-button").disabled = false;
 }
@@ -644,6 +669,7 @@ async function saveCommand(event) {
     name: commandForm.elements.name.value.trim(),
     description: commandForm.elements.description.value.trim(),
     command: commandForm.elements.command.value,
+    scope_all_servers: commandForm.elements.scope_all_servers.checked,
     server_ids: selectedServerIds,
     tags: Array.from(tagMap.values()),
   };
@@ -997,6 +1023,7 @@ document.getElementById("edit-command-button").addEventListener("click", () => {
 document.getElementById("delete-command-button").addEventListener("click", deleteSelectedCommand);
 document.getElementById("delete-command-modal-button").addEventListener("click", deleteSelectedCommand);
 document.getElementById("run-command-button").addEventListener("click", runSelectedCommand);
+document.getElementById("command-scope-all").addEventListener("change", syncCommandScopeUi);
 
 document.getElementById("detail-probe-button").addEventListener("click", probeSelectedServer);
 document.getElementById("logout-button").addEventListener("click", logout);
