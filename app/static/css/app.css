@@ -1010,6 +1010,10 @@ pre {
   background: var(--surface-soft);
 }
 
+.selector-panel.disabled-panel {
+  opacity: 0.55;
+}
+
 .selector-list {
   display: grid;
   gap: 8px;
