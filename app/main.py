@@ -51,6 +51,7 @@ XIAOZHI_ENDPOINT_KEY = "xiaozhi_endpoint_url"
 async def lifespan(_: FastAPI):
     init_db()
     bootstrap_admin_user()
+    repository.ensure_builtin_monitor_commands()
     runtime_config = get_xiaozhi_runtime_config()
     xiaozhi_bridge.configure(**runtime_config)
     async with anyio.create_task_group() as task_group:
