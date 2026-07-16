@@ -1,0 +1,23 @@
+[project]
+name = "mcpeye-zhishou"
+version = "0.1.0"
+description = "McpEye 智守，一个带网页后台和 MCP 接口的开源服务器巡检系统。"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "cryptography>=49.0.0",
+  "fastapi>=0.139.1",
+  "itsdangerous>=2.2.0",
+  "jinja2>=3.1.6",
+  "mcp>=1.28.1",
+  "paramiko>=5.0.0",
+  "uvicorn>=0.51.0",
+  "websockets>=16.1",
+]
+
+[tool.setuptools]
+packages = ["app"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
