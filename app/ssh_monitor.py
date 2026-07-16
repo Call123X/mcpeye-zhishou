@@ -33,22 +33,11 @@ class SSHMonitorService:
         return await asyncio.to_thread(self._build_snapshot, server)
 
     async def get_metric_by_name(self, server_name: str, metric: str) -> dict[str, Any]:
-        snapshot = await self.get_snapshot_by_name(server_name)
         normalized = metric.strip().lower()
-        if normalized in snapshot:
-            return {"metric": normalized, "value": snapshot[normalized]}
-        aliases = {
-            "cpu": snapshot["cpu"],
-            "memory": snapshot["memory"],
-            "disk": snapshot["disk"],
-            "network": snapshot["network"],
-            "processor": snapshot["processor_model"],
-            "hostname": snapshot["hostname"],
-            "os": snapshot["os_info"],
-        }
-        if normalized in aliases:
-            return {"metric": normalized, "value": aliases[normalized]}
-        raise ValueError(f"Unsupported metric '{metric}'")
+        server = self.repository.get_server_by_name(server_name)
+        if not server:
+            raise ValueError(f"Server '{server_name}' not found")
+        return await asyncio.to_thread(self._build_metric_value, server, normalized)
 
     async def get_status_board(self) -> list[dict[str, Any]]:
         servers = [self.repository.get_server(item["id"]) for item in self.repository.list_servers()]
@@ -119,6 +108,31 @@ class SSHMonitorService:
                 "network": self._get_network_stats(client),
             }
         return snapshot
+
+    def _build_metric_value(self, server: dict[str, Any], metric: str) -> dict[str, Any]:
+        with self._connect(server) as client:
+            if metric == "cpu":
+                value: Any = self._get_cpu_stats(client)
+            elif metric == "memory":
+                value = self._get_memory_stats(client)
+            elif metric == "disk":
+                value = self._get_disk_stats(client)
+            elif metric == "network":
+                value = self._get_network_stats(client)
+            elif metric in {"processor", "processor_model"}:
+                value = self._get_processor_model(client)
+            elif metric == "hostname":
+                value = self._run_command(client, "hostname")
+            elif metric == "os":
+                value = self._run_command(
+                    client,
+                    "sh -lc \"uname -srvmo 2>/dev/null || cat /etc/os-release | head -n 4\"",
+                )
+            elif metric == "uptime":
+                value = self._run_command(client, "uptime -p 2>/dev/null || uptime")
+            else:
+                raise ValueError(f"Unsupported metric '{metric}'")
+        return {"metric": metric, "value": value}
 
     def _build_health_summary(self, server: dict[str, Any]) -> dict[str, Any]:
         checked_at = datetime.now(timezone.utc).isoformat()
@@ -265,7 +279,7 @@ class SSHMonitorService:
     ) -> tuple[str, str, int]:
         stdin = stdout = stderr = None
         try:
-            stdin, stdout, stderr = client.exec_command(command, timeout=15)
+            stdin, stdout, stderr = client.exec_command(command, timeout=8)
             if stdin:
                 stdin.close()
             out = stdout.read().decode("utf-8", errors="replace").strip()
@@ -360,7 +374,7 @@ class SSHMonitorService:
         )
         dns_check = self._run_command(
             client,
-            "sh -lc \"getent hosts openai.com >/dev/null 2>&1 && echo ok || echo unavailable\"",
+            self._dns_check_command(),
         )
         return {
             "status": external_ping or "unknown",
@@ -377,12 +391,25 @@ class SSHMonitorService:
         )
         dns_check = self._run_command(
             client,
-            "sh -lc \"getent hosts openai.com >/dev/null 2>&1 && echo ok || echo unavailable\"",
+            self._dns_check_command(),
         )
         status = external_ping or "unknown"
         if status == "reachable" and dns_check == "unavailable":
             status = "degraded"
         return {"status": status, "dns": dns_check or "unknown"}
+
+    def _dns_check_command(self) -> str:
+        return (
+            "sh -lc '"
+            "if command -v timeout >/dev/null 2>&1; then "
+            "timeout 2 getent hosts openai.com >/dev/null 2>&1 && echo ok || echo unavailable; "
+            "elif command -v python3 >/dev/null 2>&1; then "
+            "python3 -c \"import socket; socket.setdefaulttimeout(2); "
+            "socket.getaddrinfo(\\\"openai.com\\\", 443); print(\\\"ok\\\")\" 2>/dev/null || echo unavailable; "
+            "else "
+            "getent hosts openai.com >/dev/null 2>&1 && echo ok || echo unavailable; "
+            "fi'"
+        )
 
     def _parse_proc_net_dev(self, value: str) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
