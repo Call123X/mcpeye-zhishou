@@ -70,6 +70,8 @@ def init_db() -> None:
               name TEXT NOT NULL,
               description TEXT NOT NULL DEFAULT '',
               command TEXT NOT NULL,
+              scope_all_servers INTEGER NOT NULL DEFAULT 0,
+              is_builtin INTEGER NOT NULL DEFAULT 0,
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
             );
@@ -117,6 +119,14 @@ def init_db() -> None:
               ON monitor_command_tag_targets(tag);
             """
         )
+        for statement in (
+            "ALTER TABLE monitor_commands ADD COLUMN scope_all_servers INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE monitor_commands ADD COLUMN is_builtin INTEGER NOT NULL DEFAULT 0",
+        ):
+            try:
+                cursor.execute(statement)
+            except sqlite3.OperationalError:
+                pass
         cursor.execute(
             """
             INSERT INTO monitor_commands (
