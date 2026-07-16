@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>登录 - {{ app_name }}</title>
+    <link rel="stylesheet" href="/static/css/app.css" />
+  </head>
+  <body class="login-body">
+    <main class="login-shell">
+      <section class="login-intro">
+        <div class="brand-block login-brand">
+          <div class="brand-mark" aria-hidden="true">智守</div>
+          <div><strong>McpEye 智守</strong><span>MCP 运维控制台</span></div>
+        </div>
+        <div class="login-message">
+          <p class="eyebrow">MCPEYE ZHISHOU</p>
+          <h1>统一管理你的服务器巡检入口</h1>
+          <p>保存多台服务器的 SSH 连接，查看 CPU、内存、硬盘和网络状态，并允许机器人通过名称直接调用。</p>
+        </div>
+        <div class="login-feature-row"><span>加密凭据</span><span>实时巡检</span><span>请求日志</span></div>
+      </section>
+      <section class="login-form-wrap">
+        <form id="login-form" class="login-form">
+          <div><p class="eyebrow">ADMIN CONSOLE</p><h2>登录管理后台</h2><p>进入 McpEye 智守 控制台。</p></div>
+          <label><span>用户名</span><input name="username" value="{{ default_username }}" autocomplete="username" required /></label>
+          <label><span>密码</span><input name="password" type="password" autocomplete="current-password" required /></label>
+          <button type="submit" class="button primary login-button">进入控制台</button>
+          <p id="login-error" class="error-text" hidden></p>
+        </form>
+      </section>
+    </main>
+    <script src="/static/js/login.js"></script>
+  </body>
+</html>
