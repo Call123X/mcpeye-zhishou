@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ app_name }}</title>
+    <link rel="stylesheet" href="/static/css/app.css" />
+  </head>
+  <body class="app-body" data-initial-view="{{ initial_view or 'overview' }}">
+    <div class="dashboard-shell">
+      <aside class="app-sidebar">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">智守</div>
+          <div>
+            <strong>McpEye 智守</strong>
+            <span>MCP 运维控制台</span>
+          </div>
+        </div>
+
+        <nav class="side-nav" aria-label="主导航">
+          <a href="/" data-nav-view="overview">监控总览</a>
+          <a href="/servers" data-nav-view="servers">服务器管理</a>
+          <a href="/commands" data-nav-view="commands">巡检命令</a>
+          <a href="/logs" data-nav-view="logs">请求日志</a>
+          <a href="/settings" data-nav-view="settings">系统设置</a>
+          <a href="/about" data-nav-view="about">关于</a>
+        </nav>
+
+        <div class="sidebar-status">
+          <div class="status-line">
+            <span id="sidebar-xiaozhi-dot" class="status-dot muted"></span>
+            <div>
+              <strong>小智 MCP</strong>
+              <span id="sidebar-xiaozhi-state">正在读取状态</span>
+            </div>
+          </div>
+          <div class="status-line">
+            <span class="status-dot online"></span>
+            <div>
+              <strong>本地服务</strong>
+              <span>Web 管理台在线</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebar-footer">
+          <div class="user-block">
+            <span class="avatar">{{ (username or 'A')[0] | upper }}</span>
+            <div>
+              <strong>{{ username or "admin" }}</strong>
+              <span>管理员</span>
+            </div>
+          </div>
+          <button id="logout-button" class="button secondary compact" type="button">退出</button>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">SERVER OPERATIONS</p>
+            <h1 id="page-title">监控总览</h1>
+          </div>
+          <div id="topbar-time" class="topbar-time"></div>
+        </header>
+
+        <section class="view-panel" data-view-panel="overview">
+          <div class="summary-grid">
+            <article class="summary-card accent-green">
+              <span>已配置服务器</span>
+              <strong id="server-count">0</strong>
+              <small>机器人可以通过名称直接调用这些服务器</small>
+            </article>
+            <article class="summary-card accent-blue">
+              <span>小智桥接</span>
+              <strong id="overview-xiaozhi-state">读取中</strong>
+              <small id="overview-xiaozhi-detail">等待连接状态</small>
+            </article>
+            <article class="summary-card accent-coral">
+              <span>本地 MCP 地址</span>
+              <code id="mcp-url">/mcp</code>
+              <small>Streamable HTTP</small>
+            </article>
+          </div>
+
+          <section class="section-block">
+            <div class="section-head">
+              <div>
+                <h2>实时巡检</h2>
+                <p>选择一台服务器，查看 CPU、内存、磁盘、网络和系统信息。</p>
+              </div>
+              <div class="inline-actions">
+                <select id="overview-server-select" aria-label="选择服务器"></select>
+                <button id="probe-button" class="button primary" type="button">立即巡检</button>
+              </div>
+            </div>
+
+            <div class="selected-server-line">
+              <div>
+                <span class="status-dot muted" id="selected-server-dot"></span>
+                <strong id="selected-server-name">请选择一台服务器</strong>
+              </div>
+              <span id="selected-server-meta">尚未执行巡检</span>
+            </div>
+
+            <div class="metrics-grid">
+              <article class="metric-card">
+                <div class="metric-title"><span>CPU 使用率</span><b>CPU</b></div>
+                <strong id="cpu-metric">-</strong>
+                <small id="cpu-detail">等待巡检</small>
+              </article>
+              <article class="metric-card">
+                <div class="metric-title"><span>内存使用率</span><b>RAM</b></div>
+                <strong id="memory-metric">-</strong>
+                <small id="memory-detail">等待巡检</small>
+              </article>
+              <article class="metric-card">
+                <div class="metric-title"><span>磁盘占用率</span><b>DISK</b></div>
+                <strong id="disk-metric">-</strong>
+                <small id="disk-detail">等待巡检</small>
+              </article>
+              <article class="metric-card">
+                <div class="metric-title"><span>网络状态</span><b>NET</b></div>
+                <strong id="network-metric">-</strong>
+                <small id="network-detail">等待巡检</small>
+              </article>
+            </div>
+
+            <div class="details-grid">
+              <article class="detail-panel">
+                <div class="section-head compact-head">
+                  <div><h3>系统信息</h3></div>
+                </div>
+                <dl class="detail-list">
+                  <div><dt>处理器型号</dt><dd id="processor-model">-</dd></div>
+                  <div><dt>主机名</dt><dd id="hostname-value">-</dd></div>
+                  <div><dt>运行时长</dt><dd id="uptime-value">-</dd></div>
+                  <div><dt>系统信息</dt><dd id="os-value">-</dd></div>
+                </dl>
+              </article>
+              <article class="detail-panel">
+                <div class="section-head compact-head">
+                  <div><h3>网络接口</h3></div>
+                </div>
+                <pre id="network-interfaces" class="code-output">等待巡检</pre>
+                <div id="network-traffic" class="traffic-wrap"></div>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <section class="view-panel" data-view-panel="servers" hidden>
+          <div class="page-heading">
+            <div>
+              <p>统一管理 SSH 连接、标签、备注和服务器可用状态。</p>
+            </div>
+            <div class="inline-actions">
+              <button id="refresh-server-health-button" class="button secondary" type="button">批量刷新状态</button>
+              <button id="new-server-button" class="button primary" type="button">添加服务器</button>
+            </div>
+          </div>
+
+          <section class="form-panel fleet-panel">
+            <div class="section-head">
+              <div>
+                <h2>服务器状态列表</h2>
+                <p>批量查看延迟、连接状态、认证错误、磁盘占用和网络异常。</p>
+              </div>
+            </div>
+            <div id="server-health-summary" class="server-health-summary"></div>
+            <div class="status-board-wrap">
+              <table class="status-board-table">
+                <thead>
+                  <tr>
+                    <th>服务器</th>
+                    <th>状态</th>
+                    <th>延迟</th>
+                    <th>认证</th>
+                    <th>磁盘</th>
+                    <th>网络</th>
+                    <th>问题</th>
+                  </tr>
+                </thead>
+                <tbody id="server-health-table-body">
+                  <tr>
+                    <td colspan="7" class="status-table-empty">正在读取服务器状态</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <div class="server-workspace">
+            <aside class="server-directory">
+              <div class="directory-head">
+                <strong>服务器列表</strong>
+                <span id="server-list-count">0 台</span>
+              </div>
+              <div id="server-list" class="server-list"></div>
+            </aside>
+
+            <section class="form-panel detail-stack">
+              <div class="section-head">
+                <div>
+                  <h2>服务器详情</h2>
+                  <p>查看连接信息、标签、备注以及适用的巡检命令。</p>
+                </div>
+                <div class="inline-actions">
+                  <button id="detail-probe-button" class="button secondary" type="button">实时巡检</button>
+                  <button id="edit-server-button" class="button primary" type="button">编辑服务器</button>
+                </div>
+              </div>
+
+              <div id="server-detail-empty" class="empty-state">
+                <strong>还没有选中服务器</strong>
+                <span>从左侧选择一台服务器，或新建一台服务器。</span>
+              </div>
+
+              <div id="server-detail-card" hidden>
+                <div class="detail-hero">
+                  <div>
+                    <div id="server-detail-status" class="summary-chip neutral">未检测</div>
+                    <h3 id="server-detail-name">-</h3>
+                    <p id="server-detail-meta">-</p>
+                  </div>
+                </div>
+                <dl class="detail-list">
+                  <div><dt>认证方式</dt><dd id="server-detail-auth">-</dd></div>
+                  <div><dt>标签</dt><dd id="server-detail-tags">-</dd></div>
+                  <div><dt>备注</dt><dd id="server-detail-notes">-</dd></div>
+                  <div><dt>适用命令</dt><dd id="server-detail-command-count">0 条</dd></div>
+                </dl>
+                <div class="detail-subsection">
+                  <div class="subsection-head">
+                    <strong>可用巡检命令</strong>
+                  </div>
+                  <div id="selected-server-commands" class="token-list"></div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view-panel" data-view-panel="commands" hidden>
+          <div class="page-heading">
+            <div>
+              <p>自定义巡检脚本，并指定哪些服务器或哪些标签的服务器可以使用。</p>
+            </div>
+            <div class="inline-actions">
+              <button id="new-command-button" class="button primary" type="button">新增命令</button>
+            </div>
+          </div>
+
+          <div class="server-workspace">
+            <aside class="server-directory">
+              <div class="directory-head">
+                <strong>命令列表</strong>
+                <span id="command-list-count">0 条</span>
+              </div>
+              <div id="command-list" class="server-list"></div>
+            </aside>
+
+            <section class="form-panel detail-stack">
+              <div class="section-head">
+                <div>
+                  <h2>命令详情</h2>
+                  <p>这里可以查看命令内容、适用范围以及执行结果。</p>
+                </div>
+                <div class="inline-actions">
+                  <button id="edit-command-button" class="button secondary" type="button">编辑命令</button>
+                  <button id="delete-command-button" class="button danger" type="button">删除命令</button>
+                </div>
+              </div>
+
+              <div id="command-detail-empty" class="empty-state">
+                <strong>还没有巡检命令</strong>
+                <span>新建命令后，可以按服务器或标签分配使用范围。</span>
+              </div>
+
+              <div id="command-detail-card" hidden>
+                <div class="detail-hero">
+                  <div>
+                    <div class="summary-chip success">巡检命令</div>
+                    <h3 id="command-detail-name">-</h3>
+                    <p id="command-detail-description">-</p>
+                  </div>
+                </div>
+
+                <div class="detail-subsection">
+                  <div class="subsection-head"><strong>Shell 命令</strong></div>
+                  <pre id="command-detail-command" class="code-output">-</pre>
+                </div>
+
+                <div class="detail-subsection">
+                  <div class="subsection-head"><strong>直接指定的服务器</strong></div>
+                  <div id="command-detail-targets" class="token-list"></div>
+                </div>
+
+                <div class="detail-subsection">
+                  <div class="subsection-head"><strong>标签范围</strong></div>
+                  <div id="command-detail-tags" class="token-list"></div>
+                </div>
+
+                <div class="detail-subsection">
+                  <div class="subsection-head"><strong>最终可用服务器</strong></div>
+                  <div id="command-detail-applicable" class="token-list"></div>
+                </div>
+
+                <div class="detail-subsection">
+                  <div class="subsection-head">
+                    <strong>执行测试</strong>
+                  </div>
+                  <div class="inline-actions stretch-actions">
+                    <select id="command-run-server-select" aria-label="选择执行服务器"></select>
+                    <button id="run-command-button" class="button primary" type="button">执行命令</button>
+                  </div>
+                  <pre id="command-output" class="code-output large-output">等待执行巡检命令</pre>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view-panel" data-view-panel="logs" hidden>
+          <div class="page-heading">
+            <div>
+              <p>查看 Web、MCP 和小智桥接产生的请求、返回内容、耗时和错误。</p>
+            </div>
+            <div class="inline-actions">
+              <label class="toggle-label"><input id="auto-refresh-logs" type="checkbox" checked /> 自动刷新</label>
+              <button id="refresh-logs-button" class="button secondary" type="button">刷新</button>
+            </div>
+          </div>
+          <div class="log-toolbar">
+            <label><span>类型</span><select id="log-category-filter"><option value="">全部类型</option><option value="mcp_tool">MCP 工具调用</option><option value="mcp_protocol">MCP 协议</option><option value="xiaozhi">小智桥接</option><option value="ssh_probe">SSH 巡检</option><option value="settings">后台设置</option></select></label>
+            <label><span>状态</span><select id="log-level-filter"><option value="">全部状态</option><option value="info">正常</option><option value="error">错误</option></select></label>
+            <label><span>数量</span><select id="log-limit-filter"><option value="50">最近 50 条</option><option value="100" selected>最近 100 条</option><option value="300">最近 300 条</option></select></label>
+            <button id="clear-logs-button" class="button danger push-right" type="button">清空日志</button>
+          </div>
+          <div id="log-summary" class="log-summary">正在读取日志</div>
+          <div id="log-list" class="activity-list"></div>
+        </section>
+
+        <section class="view-panel" data-view-panel="settings" hidden>
+          <div class="page-heading">
+            <div>
+              <p>管理小智接入点和 Token。Token 会加密保存，页面与日志只显示掩码。</p>
+            </div>
+          </div>
+          <div class="settings-grid">
+            <section class="form-panel">
+              <div class="integration-heading">
+                <div>
+                  <span class="integration-badge">MCP</span>
+                  <div>
+                    <h2>小智机器人接入</h2>
+                    <p>通过 WebSocket 将本地服务器巡检工具提供给小智。</p>
+                  </div>
+                </div>
+                <span id="settings-xiaozhi-badge" class="state-badge neutral">读取中</span>
+              </div>
+              <form id="xiaozhi-settings-form">
+                <label class="toggle-row">
+                  <div>
+                    <strong>启用小智桥接</strong>
+                    <span>关闭后，本地 Web 与 MCP 仍可继续使用。</span>
+                  </div>
+                  <input name="enabled" type="checkbox" />
+                </label>
+                <label><span>接入点地址</span><input name="endpoint_base_url" type="url" placeholder="wss://api.xiaozhi.me/mcp/" required /></label>
+                <label>
+                  <span>小智 Token</span>
+                  <div class="password-field">
+                    <input name="token" type="password" autocomplete="new-password" placeholder="输入新的 Token" />
+                    <button id="toggle-token-button" class="button secondary compact" type="button">显示</button>
+                  </div>
+                  <small id="token-hint">留空表示保持已保存的 Token</small>
+                </label>
+                <div class="form-actions">
+                  <button type="submit" class="button primary">保存并应用</button>
+                  <button id="reconnect-xiaozhi-button" type="button" class="button secondary">立即重连</button>
+                  <span id="xiaozhi-form-status" class="form-status"></span>
+                </div>
+              </form>
+            </section>
+            <aside class="status-panel">
+              <h3>连接详情</h3>
+              <dl class="detail-list">
+                <div><dt>当前状态</dt><dd id="xiaozhi-detail-state">-</dd></div>
+                <div><dt>接入地址</dt><dd id="xiaozhi-detail-endpoint">-</dd></div>
+                <div><dt>最近连接</dt><dd id="xiaozhi-detail-connected">-</dd></div>
+                <div><dt>最近尝试</dt><dd id="xiaozhi-detail-attempt">-</dd></div>
+                <div><dt>重连间隔</dt><dd id="xiaozhi-detail-delay">-</dd></div>
+              </dl>
+              <div id="xiaozhi-last-error" class="error-callout" hidden></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view-panel" data-view-panel="about" hidden>
+          <div class="page-heading">
+            <div>
+              <p>这个后台用于统一管理服务器巡检、MCP 工具接入和小智桥接。</p>
+            </div>
+          </div>
+          <div class="about-grid">
+            <section class="form-panel about-panel">
+              <span class="about-tag">McpEye 智守</span>
+              <h3>面向服务器巡检的开源 MCP 控制台</h3>
+              <p>支持多台 Linux 服务器、SSH 凭据管理、实时巡检、自定义命令、小智接入和请求日志追踪。</p>
+              <dl class="detail-list">
+                <div><dt>本地后台</dt><dd>FastAPI + Jinja2</dd></div>
+                <div><dt>MCP 能力</dt><dd>FastMCP / Streamable HTTP</dd></div>
+                <div><dt>数据存储</dt><dd>SQLite + 本地加密</dd></div>
+                <div><dt>适用场景</dt><dd>运维巡检 / 机器人调用 / 自定义 SSH 检查</dd></div>
+              </dl>
+            </section>
+            <section class="form-panel about-panel">
+              <span class="about-tag">开源项目</span>
+              <h3>项目主页</h3>
+              <p>McpEye 智守 的源码、更新和部署说明都可以从这里进入。</p>
+              <a class="developer-link" href="https://github.com/Call123X" target="_blank" rel="noreferrer">github.com/Call123X</a>
+              <p class="about-note">建议在 GitHub 项目页继续补充部署说明、版本更新记录和问题反馈入口。</p>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="server-modal" class="modal-shell" hidden>
+      <div class="modal-backdrop" data-close-modal="server"></div>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="server-modal-title">
+        <div class="modal-head">
+          <div>
+            <h2 id="server-modal-title">添加服务器</h2>
+            <p>保存 SSH 连接信息、标签和备注。</p>
+          </div>
+          <button class="modal-close" type="button" data-close-modal="server" aria-label="关闭">×</button>
+        </div>
+        <form id="server-form" class="modal-form">
+          <input type="hidden" name="server_id" />
+          <div class="form-grid two-columns">
+            <label><span>显示名称</span><input name="name" placeholder="例如：算力服务器" required /></label>
+            <label><span>主机地址</span><input name="host" placeholder="192.168.1.20" required /></label>
+            <label><span>SSH 端口</span><input name="port" type="number" value="22" required /></label>
+            <label><span>SSH 用户名</span><input name="username" placeholder="root" required /></label>
+          </div>
+          <div class="field-group">
+            <span class="field-label">认证方式</span>
+            <div class="segmented-control">
+              <button type="button" data-auth-type="password" class="auth-option active">密码</button>
+              <button type="button" data-auth-type="key" class="auth-option">SSH 密钥</button>
+            </div>
+          </div>
+          <input type="hidden" name="auth_type" value="password" />
+          <div id="password-auth-fields">
+            <label><span>SSH 密码</span><input name="password" type="password" autocomplete="new-password" placeholder="编辑时留空表示保持原密码" /></label>
+          </div>
+          <div id="key-auth-fields" hidden>
+            <label><span>SSH 私钥</span><textarea name="private_key" rows="7" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea></label>
+            <label><span>私钥口令</span><input name="private_key_passphrase" type="password" autocomplete="new-password" /></label>
+          </div>
+          <div class="form-grid two-columns">
+            <label><span>标签</span><input name="tags" placeholder="GPU, 生产环境" /></label>
+            <label><span>备注</span><input name="notes" placeholder="机房、用途等" /></label>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="button primary">保存服务器</button>
+            <button type="button" id="delete-server-button" class="button danger" disabled>删除</button>
+            <span id="server-form-status" class="form-status"></span>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="command-modal" class="modal-shell" hidden>
+      <div class="modal-backdrop" data-close-modal="command"></div>
+      <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="command-modal-title">
+        <div class="modal-head">
+          <div>
+            <h2 id="command-modal-title">新增巡检命令</h2>
+            <p>设置命令内容，并指定适用服务器或标签。</p>
+          </div>
+          <button class="modal-close" type="button" data-close-modal="command" aria-label="关闭">×</button>
+        </div>
+        <form id="command-form" class="modal-form">
+          <input type="hidden" name="command_id" />
+          <div class="form-grid two-columns">
+            <label><span>命令名称</span><input name="name" placeholder="例如：查看 GPU 状态" required /></label>
+            <label><span>用途说明</span><input name="description" placeholder="这条命令会检查什么" /></label>
+          </div>
+          <label><span>Shell 命令</span><textarea name="command" rows="5" placeholder="nvidia-smi" required></textarea></label>
+
+          <div class="form-grid two-columns">
+            <section class="selector-panel">
+              <div class="subsection-head"><strong>指定服务器</strong><span>可单选，也可多选</span></div>
+              <div id="command-server-targets" class="selector-list"></div>
+            </section>
+            <section class="selector-panel">
+              <div class="subsection-head"><strong>指定标签</strong><span>所有带这些标签的服务器都会生效</span></div>
+              <div id="command-tag-targets" class="selector-list"></div>
+              <label><span>补充标签</span><input name="tags" placeholder="可手动输入多个标签，用逗号分隔" /></label>
+            </section>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="button primary">保存命令</button>
+            <button type="button" id="delete-command-modal-button" class="button danger" disabled>删除</button>
+            <span id="command-form-status" class="form-status"></span>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="/static/js/dashboard.js"></script>
+  </body>
+</html>
