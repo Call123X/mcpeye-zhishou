@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from .builtin_commands import BUILTIN_MONITOR_COMMANDS
 from .db import db_cursor
 from .security import CredentialCipher
 
@@ -137,6 +138,52 @@ class Repository:
     def clear_activity_logs(self) -> None:
         with db_cursor() as cursor:
             cursor.execute("DELETE FROM activity_logs")
+
+    def ensure_builtin_monitor_commands(self) -> None:
+        with db_cursor() as cursor:
+            for item in BUILTIN_MONITOR_COMMANDS:
+                existing = cursor.execute(
+                    "SELECT id FROM monitor_commands WHERE name = ?",
+                    (item["name"],),
+                ).fetchone()
+                now = utc_now()
+                if existing:
+                    command_id = int(existing["id"])
+                    cursor.execute(
+                        """
+                        UPDATE monitor_commands
+                        SET description = ?, command = ?, scope_all_servers = ?, is_builtin = ?, updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            item["description"],
+                            item["command"],
+                            1 if item.get("scope_all_servers") else 0,
+                            1 if item.get("is_builtin") else 0,
+                            now,
+                            command_id,
+                        ),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO monitor_commands (
+                          name, description, command, scope_all_servers, is_builtin, created_at, updated_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            item["name"],
+                            item["description"],
+                            item["command"],
+                            1 if item.get("scope_all_servers") else 0,
+                            1 if item.get("is_builtin") else 0,
+                            now,
+                            now,
+                        ),
+                    )
+                    command_id = int(cursor.lastrowid)
+                self._replace_monitor_command_targets(cursor, command_id, [], [])
 
     def list_servers(self) -> list[dict[str, Any]]:
         with db_cursor() as cursor:
@@ -323,6 +370,14 @@ class Repository:
                 ),
             )
             command_id = cursor.lastrowid
+            cursor.execute(
+                """
+                UPDATE monitor_commands
+                SET scope_all_servers = ?, is_builtin = 0
+                WHERE id = ?
+                """,
+                (1 if payload.get("scope_all_servers") else 0, command_id),
+            )
             self._replace_monitor_command_targets(
                 cursor,
                 command_id,
@@ -345,13 +400,14 @@ class Repository:
             cursor.execute(
                 """
                 UPDATE monitor_commands
-                SET name = ?, description = ?, command = ?, updated_at = ?
+                SET name = ?, description = ?, command = ?, scope_all_servers = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
                     payload["name"],
                     payload.get("description", ""),
                     payload["command"],
+                    1 if payload.get("scope_all_servers") else 0,
                     utc_now(),
                     command_id,
                 ),
@@ -512,6 +568,11 @@ class Repository:
             server_ids = sorted(direct_targets.get(item["id"], []))
             tags = sorted(tag_targets.get(item["id"], []), key=str.lower)
             applicable: dict[int, dict[str, Any]] = {}
+            item["scope_all_servers"] = bool(item.get("scope_all_servers"))
+            item["is_builtin"] = bool(item.get("is_builtin"))
+            if item["scope_all_servers"]:
+                for server in servers:
+                    applicable[server["id"]] = server
             for server_id in server_ids:
                 server = servers_by_id.get(server_id)
                 if server:
