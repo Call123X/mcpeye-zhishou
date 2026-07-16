@@ -45,6 +45,7 @@ class MonitorCommandPayload(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = ""
     command: str = Field(min_length=1)
+    scope_all_servers: bool = False
     server_ids: list[int] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
 
