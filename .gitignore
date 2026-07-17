@@ -2,3 +2,10 @@
 data/
 app/__pycache__/
 *.pyc
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+.venv/
+mcpeye_zhishou.egg-info/

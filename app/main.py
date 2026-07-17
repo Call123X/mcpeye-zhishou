@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
+from .alerting import AlertingService
 from .config import (
     STATIC_DIR,
     TEMPLATES_DIR,
@@ -24,6 +25,7 @@ from .config import (
 from .db import init_db
 from .mcp_tools import mcp, monitor, repository
 from .schemas import (
+    AlertSettingsPayload,
     CommandRunPayload,
     CustomCheckPayload,
     LoginPayload,
@@ -45,6 +47,11 @@ xiaozhi_bridge = XiaozhiBridge(
 
 XIAOZHI_ENABLED_KEY = "xiaozhi_bridge_enabled"
 XIAOZHI_ENDPOINT_KEY = "xiaozhi_endpoint_url"
+ALERT_ENABLED_KEY = "alert_push_enabled"
+ALERT_INTERVAL_KEY = "alert_push_interval_seconds"
+ALERT_NOTIFY_OFFLINE_KEY = "alert_push_notify_offline"
+ALERT_NOTIFY_RECOVERY_KEY = "alert_push_notify_recovery"
+alerting_service = AlertingService(repository, monitor, xiaozhi_bridge)
 
 
 @asynccontextmanager
@@ -54,9 +61,11 @@ async def lifespan(_: FastAPI):
     repository.ensure_builtin_monitor_commands()
     runtime_config = get_xiaozhi_runtime_config()
     xiaozhi_bridge.configure(**runtime_config)
+    alerting_service.configure(**get_alert_runtime_config())
     async with anyio.create_task_group() as task_group:
         async with mcp_http_app.router.lifespan_context(mcp_http_app):
             task_group.start_soon(xiaozhi_bridge.run_forever)
+            task_group.start_soon(alerting_service.run_forever)
             yield
             task_group.cancel_scope.cancel()
 
@@ -102,6 +111,27 @@ def get_xiaozhi_public_config() -> dict[str, Any]:
         "has_token": bool(token),
         "token_masked": mask_token(token),
         "status": xiaozhi_bridge.snapshot(),
+    }
+
+
+def get_alert_runtime_config() -> dict[str, Any]:
+    stored_enabled = repository.get_app_setting(ALERT_ENABLED_KEY)
+    stored_interval = repository.get_app_setting(ALERT_INTERVAL_KEY)
+    stored_notify_offline = repository.get_app_setting(ALERT_NOTIFY_OFFLINE_KEY)
+    stored_notify_recovery = repository.get_app_setting(ALERT_NOTIFY_RECOVERY_KEY)
+    return {
+        "enabled": stored_enabled == "true" if stored_enabled is not None else False,
+        "interval_seconds": int(stored_interval or 60),
+        "notify_offline": stored_notify_offline != "false" if stored_notify_offline is not None else True,
+        "notify_recovery": stored_notify_recovery != "false" if stored_notify_recovery is not None else True,
+    }
+
+
+def get_alert_public_config() -> dict[str, Any]:
+    runtime_config = get_alert_runtime_config()
+    return {
+        **runtime_config,
+        "status": alerting_service.snapshot(),
     }
 
 
@@ -159,6 +189,7 @@ def bootstrap_payload(user: dict[str, Any]) -> dict[str, Any]:
         },
         "integrations": {
             "xiaozhi": get_xiaozhi_public_config(),
+            "alerting": get_alert_public_config(),
         },
     }
 
@@ -304,6 +335,54 @@ async def reconnect_xiaozhi_bridge(
         request={"action": "reconnect"},
     )
     return xiaozhi_bridge.snapshot()
+
+
+@app.get("/api/alerting")
+async def get_alert_settings(
+    _: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    return get_alert_public_config()
+
+
+@app.put("/api/alerting")
+async def update_alert_settings(
+    payload: AlertSettingsPayload,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    repository.set_app_setting(ALERT_ENABLED_KEY, "true" if payload.enabled else "false")
+    repository.set_app_setting(ALERT_INTERVAL_KEY, str(payload.interval_seconds))
+    repository.set_app_setting(ALERT_NOTIFY_OFFLINE_KEY, "true" if payload.notify_offline else "false")
+    repository.set_app_setting(ALERT_NOTIFY_RECOVERY_KEY, "true" if payload.notify_recovery else "false")
+    alerting_service.configure(
+        enabled=payload.enabled,
+        interval_seconds=payload.interval_seconds,
+        notify_offline=payload.notify_offline,
+        notify_recovery=payload.notify_recovery,
+    )
+    repository.add_activity_log(
+        category="settings",
+        source="web",
+        event="Update alert push settings",
+        request={
+            "enabled": payload.enabled,
+            "interval_seconds": payload.interval_seconds,
+            "notify_offline": payload.notify_offline,
+            "notify_recovery": payload.notify_recovery,
+            "updated_by": user["username"],
+        },
+    )
+    return get_alert_public_config()
+
+
+@app.post("/api/alerting/test")
+async def send_test_alert(
+    _: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, bool]:
+    try:
+        await alerting_service.send_test_alert()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True}
 
 
 @app.get("/api/logs")

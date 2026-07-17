@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+import mcp.types as types
 from mcp.client.websocket import websocket_client
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.message import SessionMessage
@@ -105,6 +106,8 @@ class XiaozhiBridge:
         self.status = BridgeStatus(reconnect_delay_seconds=reconnect_delay_seconds)
         self._endpoint_url = ""
         self._configuration_changed = asyncio.Event()
+        self._send_lock = asyncio.Lock()
+        self._active_write_stream: LoggedSendStream | None = None
 
     def configure(self, *, enabled: bool, endpoint_url: str) -> None:
         normalized_url = endpoint_url.strip()
@@ -142,7 +145,7 @@ class XiaozhiBridge:
                 self.repository.add_activity_log(
                     category="xiaozhi",
                     source="bridge",
-                    event="连接小智",
+                    event="Connect Xiaozhi bridge",
                     direction="outbound",
                     request={"endpoint": mask_endpoint_url(endpoint_url)},
                 )
@@ -164,7 +167,7 @@ class XiaozhiBridge:
                     with suppress(asyncio.CancelledError):
                         await change_task
                     await connection_task
-                    raise RuntimeError("小智 WebSocket 连接已关闭")
+                    raise RuntimeError("Xiaozhi WebSocket connection closed")
                 except asyncio.CancelledError:
                     connection_task.cancel()
                     change_task.cancel()
@@ -177,7 +180,7 @@ class XiaozhiBridge:
                     self.repository.add_activity_log(
                         category="xiaozhi",
                         source="bridge",
-                        event="小智连接中断",
+                        event="Xiaozhi bridge disconnected",
                         level="error",
                         response={"error": str(exc)},
                         success=False,
@@ -199,29 +202,75 @@ class XiaozhiBridge:
     async def _run_once(self, endpoint_url: str) -> None:
         logger.info("Connecting Xiaozhi MCP bridge: %s", mask_endpoint_url(endpoint_url))
         async with websocket_client(endpoint_url) as (read_stream, write_stream):
+            logged_read_stream = LoggedReceiveStream(read_stream, self)
+            logged_write_stream = LoggedSendStream(write_stream, self)
             self.status.state = "connected"
             self.status.connected = True
             self.status.last_connected_at = utc_now()
             self.status.last_error = ""
+            self._active_write_stream = logged_write_stream
             self.repository.add_activity_log(
                 category="xiaozhi",
                 source="bridge",
-                event="小智连接成功",
+                event="Xiaozhi bridge connected",
                 response={"endpoint": mask_endpoint_url(endpoint_url)},
             )
-            await self.fastmcp._mcp_server.run(
-                LoggedReceiveStream(read_stream, self),
-                LoggedSendStream(write_stream, self),
-                self.fastmcp._mcp_server.create_initialization_options(),
-                stateless=False,
+            try:
+                await self.fastmcp._mcp_server.run(
+                    logged_read_stream,
+                    logged_write_stream,
+                    self.fastmcp._mcp_server.create_initialization_options(),
+                    stateless=False,
+                )
+            finally:
+                if self._active_write_stream is logged_write_stream:
+                    self._active_write_stream = None
+
+    async def push_alert(
+        self,
+        title: str,
+        message: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        level: str = "warning",
+    ) -> None:
+        if not self.status.connected or self._active_write_stream is None:
+            raise RuntimeError("Xiaozhi bridge is not connected")
+
+        level_name = level if level in {"debug", "info", "warning", "error"} else "warning"
+        text = f"{title}: {message}" if title else message
+        if payload:
+            server_name = payload.get("server")
+            if server_name and server_name not in text:
+                text = f"{server_name}, {text}"
+
+        notification = types.ServerNotification(
+            types.LoggingMessageNotification(
+                params=types.LoggingMessageNotificationParams(
+                    level=level_name,
+                    logger="mcpeye.alert",
+                    data=text,
+                )
             )
+        )
+        session_message = SessionMessage(
+            message=types.JSONRPCMessage(
+                types.JSONRPCNotification(
+                    jsonrpc="2.0",
+                    **notification.model_dump(by_alias=True, mode="json", exclude_none=True),
+                )
+            )
+        )
+
+        async with self._send_lock:
+            await self._active_write_stream.send(session_message)
 
     def record_protocol_message(self, direction: str, item: Any) -> None:
         if isinstance(item, Exception):
             self.repository.add_activity_log(
                 category="mcp_protocol",
                 source="xiaozhi",
-                event="协议解析错误",
+                event="Protocol parse error",
                 level="error",
                 direction=direction,
                 response={"error": str(item)},
@@ -231,7 +280,7 @@ class XiaozhiBridge:
         if not isinstance(item, SessionMessage):
             return
         payload = item.message.model_dump(by_alias=True, mode="json", exclude_none=True)
-        event = payload.get("method") or ("MCP 响应" if "result" in payload else "MCP 错误响应")
+        event = payload.get("method") or ("MCP response" if "result" in payload else "MCP error response")
         request_id = str(payload.get("id", ""))
         is_success = "error" not in payload
         self.repository.add_activity_log(

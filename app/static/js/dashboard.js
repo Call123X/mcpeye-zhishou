@@ -6,6 +6,7 @@ const state = {
   selectedServerId: null,
   selectedCommandId: null,
   xiaozhi: null,
+  alerting: null,
   currentView: document.body.dataset.initialView || "overview",
 };
 
@@ -23,12 +24,14 @@ const categoryLabels = {
   mcp_protocol: "MCP 协议",
   xiaozhi: "小智桥接",
   ssh_probe: "SSH 巡检",
+  alert: "主动告警",
   settings: "后台设置",
 };
 
 const serverForm = document.getElementById("server-form");
 const commandForm = document.getElementById("command-form");
 const xiaozhiForm = document.getElementById("xiaozhi-settings-form");
+const alertForm = document.getElementById("alert-settings-form");
 const probeButton = document.getElementById("probe-button");
 
 function initializeView() {
@@ -74,6 +77,7 @@ async function fetchBootstrap() {
   renderCommandDetail();
   renderCommandTargetSelectors();
   renderXiaozhi(payload.integrations.xiaozhi, true);
+  renderAlerting(payload.integrations.alerting, true);
 
   if (state.currentView === "logs") {
     await loadLogs();
@@ -281,7 +285,7 @@ function renderServerHealthBoard(rows) {
           <td><span class="mini-badge ${auth.css}">${auth.label}</span></td>
           <td>${escapeHtml(item.disk_used_percent || "-")}<small>${escapeHtml(item.disk_available ? `可用 ${item.disk_available}` : "")}</small></td>
           <td>${escapeHtml(networkStatusText(item.network_status))}</td>
-          <td class="issue-cell">${escapeHtml(item.issue_message || "-")}</td>
+          <td class="issue-cell">${escapeHtml(statusIssueText(item))}</td>
         </tr>
       `;
     })
@@ -785,12 +789,56 @@ function renderXiaozhi(config, fillForm = false) {
   }
 }
 
+function alertingStateInfo(config) {
+  const status = config?.status || {};
+  if (!config?.enabled) return { label: "已停用", css: "neutral", detail: "后台未启用主动告警" };
+  if (status.state === "running") return { label: "运行中", css: "success", detail: "正在后台巡检并等待状态变化" };
+  if (status.state === "error") return { label: "异常", css: "error", detail: status.last_error || "巡检过程中出现错误" };
+  if (status.state === "stopped") return { label: "已停止", css: "neutral", detail: "后台任务已停止" };
+  return { label: "等待中", css: "warning", detail: "正在等待下一次巡检" };
+}
+
+function renderAlerting(config, fillForm = false) {
+  state.alerting = config;
+  const info = alertingStateInfo(config);
+  const badge = document.getElementById("settings-alert-badge");
+  badge.textContent = info.label;
+  badge.className = `state-badge ${info.css}`;
+
+  const status = config?.status || {};
+  document.getElementById("alert-detail-state").textContent = info.label;
+  document.getElementById("alert-detail-interval").textContent = `${config?.interval_seconds || status.interval_seconds || 60} 秒`;
+  document.getElementById("alert-detail-checked").textContent = formatDateTime(status.last_checked_at);
+  document.getElementById("alert-detail-sent").textContent = formatDateTime(status.last_alert_at);
+  document.getElementById("alert-detail-count").textContent = String(status.sent_alerts || 0);
+
+  const errorNode = document.getElementById("alert-last-error");
+  errorNode.hidden = !status.last_error;
+  errorNode.textContent = status.last_error || "";
+
+  if (fillForm) {
+    alertForm.elements.enabled.checked = Boolean(config?.enabled);
+    alertForm.elements.interval_seconds.value = String(config?.interval_seconds || 60);
+    alertForm.elements.notify_offline.checked = Boolean(config?.notify_offline);
+    alertForm.elements.notify_recovery.checked = Boolean(config?.notify_recovery);
+  }
+}
+
 async function refreshXiaozhiStatus(fillForm = false) {
   try {
     const config = await requestJson("/api/integrations/xiaozhi");
     renderXiaozhi(config, fillForm);
   } catch (error) {
     document.getElementById("sidebar-xiaozhi-state").textContent = "状态读取失败";
+  }
+}
+
+async function refreshAlertStatus(fillForm = false) {
+  try {
+    const config = await requestJson("/api/alerting");
+    renderAlerting(config, fillForm);
+  } catch (error) {
+    document.getElementById("alert-detail-state").textContent = error.message;
   }
 }
 
@@ -826,6 +874,44 @@ async function reconnectXiaozhi() {
   try {
     await requestJson("/api/integrations/xiaozhi/reconnect", { method: "POST" });
     window.setTimeout(() => refreshXiaozhiStatus(false), 1000);
+  } catch (error) {
+    statusNode.textContent = error.message;
+    statusNode.classList.add("error");
+  }
+}
+
+async function saveAlertSettings(event) {
+  event.preventDefault();
+  const statusNode = document.getElementById("alert-form-status");
+  statusNode.classList.remove("error");
+  statusNode.textContent = "正在保存...";
+  try {
+    const config = await requestJson("/api/alerting", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled: alertForm.elements.enabled.checked,
+        interval_seconds: Number(alertForm.elements.interval_seconds.value || 60),
+        notify_offline: alertForm.elements.notify_offline.checked,
+        notify_recovery: alertForm.elements.notify_recovery.checked,
+      }),
+    });
+    renderAlerting(config, true);
+    statusNode.textContent = "告警设置已保存";
+  } catch (error) {
+    statusNode.textContent = error.message;
+    statusNode.classList.add("error");
+  }
+}
+
+async function sendTestAlert() {
+  const statusNode = document.getElementById("alert-form-status");
+  statusNode.classList.remove("error");
+  statusNode.textContent = "正在发送测试告警...";
+  try {
+    await requestJson("/api/alerting/test", { method: "POST" });
+    statusNode.textContent = "测试告警已发出";
+    window.setTimeout(() => refreshAlertStatus(false), 800);
   } catch (error) {
     statusNode.textContent = error.message;
     statusNode.classList.add("error");
@@ -910,6 +996,28 @@ async function logout() {
   window.location.href = "/login";
 }
 
+function statusIssueText(item) {
+  const base = item.issue_message || "-";
+  if (item.status !== "offline" || !item.offline_since) return base;
+  const since = formatDateTimeCn(item.offline_since);
+  const duration = formatDuration(item.offline_duration_seconds);
+  const suffix = duration ? `离线始于 ${since}，已持续 ${duration}` : `离线始于 ${since}`;
+  if (String(base).includes("离线始于")) return base;
+  return `${base}（${suffix}）`;
+}
+
+function formatDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value)) return "";
+  if (value < 60) return `${Math.max(0, Math.round(value))} 秒`;
+  const minutes = Math.floor(value / 60);
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时 ${minutes % 60} 分钟`;
+  const days = Math.floor(hours / 24);
+  return `${days} 天 ${hours % 24} 小时`;
+}
+
 function networkStatusText(value) {
   if (value === "reachable") return "正常";
   if (value === "degraded") return "异常";
@@ -935,6 +1043,14 @@ function renderTrafficTable(rows) {
   return `<table class="traffic-table"><thead><tr><th>接口</th><th>接收</th><th>发送</th></tr></thead><tbody>${rows
     .map((row) => `<tr><td>${escapeHtml(row.interface)}</td><td>${formatBytes(row.rx_bytes)}</td><td>${formatBytes(row.tx_bytes)}</td></tr>`)
     .join("")}</tbody></table>`;
+}
+
+function formatDateTimeCn(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const weekdays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日${weekdays[date.getDay()]} ${String(date.getHours()).padStart(2, "0")}点${String(date.getMinutes()).padStart(2, "0")}分${String(date.getSeconds()).padStart(2, "0")}秒`;
 }
 
 function formatDateTime(value) {
@@ -1033,6 +1149,7 @@ document.getElementById("log-category-filter").addEventListener("change", loadLo
 document.getElementById("log-level-filter").addEventListener("change", loadLogs);
 document.getElementById("log-limit-filter").addEventListener("change", loadLogs);
 document.getElementById("reconnect-xiaozhi-button").addEventListener("click", reconnectXiaozhi);
+document.getElementById("send-test-alert-button").addEventListener("click", sendTestAlert);
 document.getElementById("toggle-token-button").addEventListener("click", (event) => {
   const input = xiaozhiForm.elements.token;
   input.type = input.type === "password" ? "text" : "password";
@@ -1049,11 +1166,17 @@ probeButton.addEventListener("click", probeSelectedServer);
 serverForm.addEventListener("submit", saveServer);
 commandForm.addEventListener("submit", saveCommand);
 xiaozhiForm.addEventListener("submit", saveXiaozhiSettings);
+alertForm.addEventListener("submit", saveAlertSettings);
 
 initializeView();
 updateClock();
 window.setInterval(updateClock, 1000);
 window.setInterval(() => refreshXiaozhiStatus(false), 5000);
+window.setInterval(() => {
+  if (state.currentView === "settings") {
+    refreshAlertStatus(false);
+  }
+}, 5000);
 window.setInterval(() => {
   if (state.currentView === "logs" && document.getElementById("auto-refresh-logs").checked) {
     loadLogs();

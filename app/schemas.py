@@ -102,3 +102,10 @@ class XiaozhiSettingsPayload(BaseModel):
     enabled: bool = True
     endpoint_base_url: str = Field(min_length=1, max_length=500)
     token: str | None = Field(default=None, max_length=4096)
+
+
+class AlertSettingsPayload(BaseModel):
+    enabled: bool = False
+    interval_seconds: int = Field(default=60, ge=15, le=3600)
+    notify_offline: bool = True
+    notify_recovery: bool = True

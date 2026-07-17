@@ -1,0 +1,18 @@
+services:
+  mcpeye-zhishou:
+    build: .
+    image: mcpeye-zhishou:latest
+    container_name: mcpeye-zhishou
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8765
+    ports:
+      - "8765:8765"
+    volumes:
+      - mcpeye_data:/app/data
+
+volumes:
+  mcpeye_data:

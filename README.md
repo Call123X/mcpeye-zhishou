@@ -1,6 +1,5 @@
 # McpEye 智守
 
-
 McpEye 智守 是一个面向 Linux 服务器巡检场景的 MCP 管理系统，提供网页后台、SSH 巡检能力和机器人可调用的 MCP 接口。
 
 你可以在后台维护多台服务器，用自然语言名称区分业务主机，然后让机器人直接提问：
@@ -74,6 +73,82 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 - 系统设置: `http://127.0.0.1:8765/settings`
 - MCP 地址: `http://127.0.0.1:8765/mcp`
 
+
+## Docker 部署
+
+### 方式一：使用 Docker Compose
+
+1. 复制环境变量文件：
+
+```bash
+cp .env.example .env
+```
+
+2. 编辑 `.env`，至少修改管理员密码和密钥：
+
+```env
+APP_HOST=0.0.0.0
+APP_PORT=8765
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=请修改为强密码
+APP_SECRET=请修改为随机长字符串
+XIAOZHI_BRIDGE_ENABLED=false
+XIAOZHI_ENDPOINT_URL=
+XIAOZHI_RECONNECT_DELAY_SECONDS=5
+```
+
+`APP_SECRET` 用于会话签名和凭据加密。生产环境建议固定填写，不要留空，否则更换容器或数据目录后可能无法解密已保存的服务器密码或密钥。
+
+3. 启动服务：
+
+```bash
+docker compose up -d --build
+```
+
+4. 查看状态和日志：
+
+```bash
+docker compose ps
+docker compose logs -f
+```
+
+启动后访问：
+
+- 后台首页：`http://服务器IP:8765/`
+- MCP 地址：`http://服务器IP:8765/mcp`
+
+数据会保存在 Docker volume `mcpeye_data` 中，包括 SQLite 数据库和本地密钥文件。
+
+### 方式二：使用 Docker 命令
+
+```bash
+docker build -t mcpeye-zhishou:latest .
+docker run -d \
+  --name mcpeye-zhishou \
+  --restart unless-stopped \
+  --env-file .env \
+  -e APP_HOST=0.0.0.0 \
+  -e APP_PORT=8765 \
+  -p 8765:8765 \
+  -v mcpeye_data:/app/data \
+  mcpeye-zhishou:latest
+```
+
+### 升级容器
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+只要继续使用同一个 `mcpeye_data` volume，服务器配置、巡检命令、日志和历史数据会保留。
+
+### 安全提醒
+
+- 不要把 `.env`、`data/`、数据库文件或小智 Token 提交到 GitHub。
+- 生产环境务必修改 `ADMIN_PASSWORD` 和 `APP_SECRET`。
+- 如果小智 Token 曾经泄露，请先在小智侧重置 Token，再更新 `.env` 或后台配置。
+
 ## MCP 能力
 
 当前提供的工具包括：
@@ -102,8 +177,3 @@ McpEye 智守 适合以下场景：
 
 - 项目名称：McpEye 智守
 - 项目主页：[github.com/Call123X](https://github.com/Call123X)
-
-<img width="1880" height="952" alt="image" src="https://github.com/user-attachments/assets/b9ba9939-71c6-48a1-b3ec-0e2ed26db774" />
-<img width="1893" height="952" alt="image" src="https://github.com/user-attachments/assets/460df840-1eeb-4eb7-a36e-3688284130f7" />
-<img width="1882" height="959" alt="image" src="https://github.com/user-attachments/assets/0b8c9c0f-f5bd-46b1-b6b2-2e6f3f8dbebd" />
-<img width="1867" height="952" alt="image" src="https://github.com/user-attachments/assets/868714b8-7e05-41c2-8385-8b1cbfcf2edc" />

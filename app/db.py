@@ -109,6 +109,23 @@ def init_db() -> None:
               success INTEGER NOT NULL DEFAULT 1
             );
 
+            CREATE TABLE IF NOT EXISTS server_history (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              created_at TEXT NOT NULL,
+              server_id INTEGER NOT NULL,
+              server_name TEXT NOT NULL,
+              host TEXT NOT NULL DEFAULT '',
+              status TEXT NOT NULL DEFAULT '',
+              auth_status TEXT NOT NULL DEFAULT '',
+              latency_ms INTEGER,
+              disk_used_percent TEXT NOT NULL DEFAULT '',
+              disk_available TEXT NOT NULL DEFAULT '',
+              network_status TEXT NOT NULL DEFAULT '',
+              issue_code TEXT NOT NULL DEFAULT '',
+              issue_message TEXT NOT NULL DEFAULT '',
+              payload_json TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at
               ON activity_logs(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_activity_logs_category
@@ -117,6 +134,12 @@ def init_db() -> None:
               ON monitor_command_server_targets(server_id);
             CREATE INDEX IF NOT EXISTS idx_monitor_command_tag_targets_tag
               ON monitor_command_tag_targets(tag);
+            CREATE INDEX IF NOT EXISTS idx_server_history_server_created
+              ON server_history(server_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_server_history_name_created
+              ON server_history(server_name, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_server_history_created
+              ON server_history(created_at DESC);
             """
         )
         for statement in (

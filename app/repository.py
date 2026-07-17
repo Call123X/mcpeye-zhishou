@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .builtin_commands import BUILTIN_MONITOR_COMMANDS
@@ -138,6 +138,143 @@ class Repository:
     def clear_activity_logs(self) -> None:
         with db_cursor() as cursor:
             cursor.execute("DELETE FROM activity_logs")
+
+    def list_recent_alerts(
+        self,
+        *,
+        limit: int = 20,
+        server_name: str = "",
+        level: str = "",
+    ) -> list[dict[str, Any]]:
+        clauses = ["category = ?"]
+        params: list[Any] = ["alert"]
+        if level:
+            clauses.append("level = ?")
+            params.append(level)
+        params.append(max(1, min(limit * 3, 500)))
+        with db_cursor() as cursor:
+            rows = cursor.execute(
+                f"""
+                SELECT * FROM activity_logs
+                WHERE {' AND '.join(clauses)}
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+
+        normalized_server = server_name.strip().lower()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            item = self._alert_log_to_public(row)
+            if normalized_server and not self._alert_matches_server(item, normalized_server):
+                continue
+            items.append(item)
+            if len(items) >= max(1, min(limit, 100)):
+                break
+        return items
+
+    def add_server_history(self, row: dict[str, Any]) -> None:
+        created_at = row.get("checked_at") or utc_now()
+        latency = row.get("latency_ms")
+        try:
+            latency_ms = int(latency) if latency is not None else None
+        except (TypeError, ValueError):
+            latency_ms = None
+        payload = dict(row)
+        with db_cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO server_history (
+                  created_at, server_id, server_name, host, status, auth_status, latency_ms,
+                  disk_used_percent, disk_available, network_status, issue_code, issue_message, payload_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    created_at,
+                    int(row.get("server_id") or 0),
+                    str(row.get("server_name") or ""),
+                    str(row.get("host") or ""),
+                    str(row.get("status") or ""),
+                    str(row.get("auth_status") or ""),
+                    latency_ms,
+                    str(row.get("disk_used_percent") or ""),
+                    str(row.get("disk_available") or ""),
+                    str(row.get("network_status") or ""),
+                    str(row.get("issue_code") or ""),
+                    str(row.get("issue_message") or ""),
+                    self._serialize_log_value(payload),
+                ),
+            )
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+            cursor.execute("DELETE FROM server_history WHERE created_at < ?", (cutoff,))
+
+    def list_server_history(
+        self,
+        *,
+        server_name: str = "",
+        hours: int = 24,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        normalized_hours = max(1, min(int(hours or 24), 24 * 30))
+        normalized_limit = max(1, min(int(limit or 100), 500))
+        since = (datetime.now(timezone.utc) - timedelta(hours=normalized_hours)).isoformat()
+        clauses = ["created_at >= ?"]
+        params: list[Any] = [since]
+        if server_name.strip():
+            clauses.append("lower(server_name) = lower(?)")
+            params.append(server_name.strip())
+        params.append(normalized_limit)
+        with db_cursor() as cursor:
+            rows = cursor.execute(
+                f"""
+                SELECT * FROM server_history
+                WHERE {' AND '.join(clauses)}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        items = [self._history_row_to_public(row) for row in rows]
+        if items:
+            return items
+        return self._list_server_history_from_logs(
+            server_name=server_name,
+            since=since,
+            limit=normalized_limit,
+        )
+
+    def get_status_since(
+        self,
+        *,
+        server_id: int,
+        status: str,
+        lookback_hours: int = 24 * 30,
+    ) -> str | None:
+        since = (datetime.now(timezone.utc) - timedelta(hours=max(1, min(lookback_hours, 24 * 30)))).isoformat()
+        with db_cursor() as cursor:
+            rows = cursor.execute(
+                """
+                SELECT created_at, status
+                FROM server_history
+                WHERE server_id = ? AND created_at >= ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1000
+                """,
+                (server_id, since),
+            ).fetchall()
+        if not rows:
+            return None
+        latest = rows[0]
+        if latest["status"] != status:
+            return None
+        start = latest["created_at"]
+        for row in rows[1:]:
+            if row["status"] != status:
+                break
+            start = row["created_at"]
+        return start
 
     def ensure_builtin_monitor_commands(self) -> None:
         with db_cursor() as cursor:
@@ -669,6 +806,100 @@ class Repository:
         public["private_key_cipher"] = item["private_key_cipher"]
         public["private_key_passphrase_cipher"] = item["private_key_passphrase_cipher"]
         return public
+
+    def _alert_log_to_public(self, row: Any) -> dict[str, Any]:
+        item = dict(row)
+        item["success"] = bool(item["success"])
+        request = self._deserialize_log_value(item.pop("request_json"))
+        response = self._deserialize_log_value(item.pop("response_json"))
+        item["request"] = request
+        item["response"] = response
+        item["server"] = self._extract_alert_server(request, response)
+        item["message"] = self._extract_alert_message(response)
+        return item
+
+    def _extract_alert_server(self, request: Any, response: Any) -> str:
+        for value in (request, response):
+            if isinstance(value, dict):
+                server = value.get("server")
+                if server:
+                    return str(server)
+        return ""
+
+    def _extract_alert_message(self, response: Any) -> str:
+        if isinstance(response, dict):
+            message = response.get("message") or response.get("error")
+            if message:
+                return str(message)
+        return ""
+
+    def _alert_matches_server(self, item: dict[str, Any], normalized_server: str) -> bool:
+        server = str(item.get("server") or "").strip().lower()
+        if server == normalized_server:
+            return True
+        message = str(item.get("message") or "").lower()
+        event = str(item.get("event") or "").lower()
+        return normalized_server in message or normalized_server in event
+
+    def _history_row_to_public(self, row: Any) -> dict[str, Any]:
+        item = dict(row)
+        payload = self._deserialize_log_value(item.pop("payload_json"))
+        item["payload"] = payload if isinstance(payload, dict) else None
+        return item
+
+    def _list_server_history_from_logs(
+        self,
+        *,
+        server_name: str,
+        since: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = [since, max(1, min(limit * 5, 500))]
+        with db_cursor() as cursor:
+            rows = cursor.execute(
+                """
+                SELECT id, created_at, response_json
+                FROM activity_logs
+                WHERE category = 'ssh_probe'
+                  AND event = 'Refresh server status board'
+                  AND created_at >= ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        normalized_server = server_name.strip().lower()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            response = self._deserialize_log_value(row["response_json"])
+            if not isinstance(response, dict):
+                continue
+            for payload in response.get("items", []):
+                if not isinstance(payload, dict):
+                    continue
+                if normalized_server and str(payload.get("server_name") or "").strip().lower() != normalized_server:
+                    continue
+                item = {
+                    "id": row["id"],
+                    "created_at": payload.get("checked_at") or row["created_at"],
+                    "server_id": payload.get("server_id"),
+                    "server_name": payload.get("server_name", ""),
+                    "host": payload.get("host", ""),
+                    "status": payload.get("status", ""),
+                    "auth_status": payload.get("auth_status", ""),
+                    "latency_ms": payload.get("latency_ms"),
+                    "disk_used_percent": payload.get("disk_used_percent", ""),
+                    "disk_available": payload.get("disk_available", ""),
+                    "network_status": payload.get("network_status", ""),
+                    "issue_code": payload.get("issue_code", ""),
+                    "issue_message": payload.get("issue_message", ""),
+                    "payload": payload,
+                    "source": "activity_logs",
+                }
+                items.append(item)
+                if len(items) >= limit:
+                    return items
+        return items
 
     def _serialize_log_value(self, value: Any) -> str | None:
         if value is None:

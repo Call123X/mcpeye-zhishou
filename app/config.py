@@ -53,9 +53,7 @@ class Settings(BaseSettings):
 def mask_token(token: str) -> str:
     if not token:
         return ""
-    if len(token) <= 20:
-        return "******"
-    return f"{token[:10]}...{token[-8:]}"
+    return "******"
 
 
 def mask_endpoint_url(endpoint_url: str) -> str:

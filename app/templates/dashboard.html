@@ -332,7 +332,7 @@
             </div>
           </div>
           <div class="log-toolbar">
-            <label><span>类型</span><select id="log-category-filter"><option value="">全部类型</option><option value="mcp_tool">MCP 工具调用</option><option value="mcp_protocol">MCP 协议</option><option value="xiaozhi">小智桥接</option><option value="ssh_probe">SSH 巡检</option><option value="settings">后台设置</option></select></label>
+            <label><span>类型</span><select id="log-category-filter"><option value="">全部类型</option><option value="mcp_tool">MCP 工具调用</option><option value="mcp_protocol">MCP 协议</option><option value="xiaozhi">小智桥接</option><option value="ssh_probe">SSH 巡检</option><option value="alert">主动告警</option><option value="settings">后台设置</option></select></label>
             <label><span>状态</span><select id="log-level-filter"><option value="">全部状态</option><option value="info">正常</option><option value="error">错误</option></select></label>
             <label><span>数量</span><select id="log-limit-filter"><option value="50">最近 50 条</option><option value="100" selected>最近 100 条</option><option value="300">最近 300 条</option></select></label>
             <button id="clear-logs-button" class="button danger push-right" type="button">清空日志</button>
@@ -383,6 +383,50 @@
                 </div>
               </form>
             </section>
+            <section class="form-panel">
+              <div class="integration-heading">
+                <div>
+                  <span class="integration-badge">ALERT</span>
+                  <div>
+                    <h2>主动告警推送</h2>
+                    <p>定时巡检服务器状态，发现离线、SSH 认证异常、磁盘告警或网络异常时主动推送给小智。</p>
+                  </div>
+                </div>
+                <span id="settings-alert-badge" class="state-badge neutral">读取中</span>
+              </div>
+              <form id="alert-settings-form">
+                <label class="toggle-row">
+                  <div>
+                    <strong>启用主动告警</strong>
+                    <span>服务会按巡检间隔自动检查所有服务器，并在状态变化时推送消息。</span>
+                  </div>
+                  <input name="enabled" type="checkbox" />
+                </label>
+                <label>
+                  <span>巡检间隔（秒）</span>
+                  <input name="interval_seconds" type="number" min="15" max="3600" step="5" value="60" required />
+                </label>
+                <label class="toggle-row">
+                  <div>
+                    <strong>服务器离线告警</strong>
+                    <span>服务器无法连接、连接超时或 SSH 端口不可达时，主动推送离线告警。</span>
+                  </div>
+                  <input name="notify_offline" type="checkbox" checked />
+                </label>
+                <label class="toggle-row">
+                  <div>
+                    <strong>恢复后也推送</strong>
+                    <span>例如服务器重新上线后，补发一条恢复通知。</span>
+                  </div>
+                  <input name="notify_recovery" type="checkbox" checked />
+                </label>
+                <div class="form-actions">
+                  <button type="submit" class="button primary">保存告警设置</button>
+                  <button id="send-test-alert-button" type="button" class="button secondary">发送测试告警</button>
+                  <span id="alert-form-status" class="form-status"></span>
+                </div>
+              </form>
+            </section>
             <aside class="status-panel">
               <h3>连接详情</h3>
               <dl class="detail-list">
@@ -393,6 +437,17 @@
                 <div><dt>重连间隔</dt><dd id="xiaozhi-detail-delay">-</dd></div>
               </dl>
               <div id="xiaozhi-last-error" class="error-callout" hidden></div>
+            </aside>
+            <aside class="status-panel">
+              <h3>告警详情</h3>
+              <dl class="detail-list">
+                <div><dt>当前状态</dt><dd id="alert-detail-state">-</dd></div>
+                <div><dt>巡检间隔</dt><dd id="alert-detail-interval">-</dd></div>
+                <div><dt>最近巡检</dt><dd id="alert-detail-checked">-</dd></div>
+                <div><dt>最近推送</dt><dd id="alert-detail-sent">-</dd></div>
+                <div><dt>累计推送</dt><dd id="alert-detail-count">0</dd></div>
+              </dl>
+              <div id="alert-last-error" class="error-callout" hidden></div>
             </aside>
           </div>
         </section>

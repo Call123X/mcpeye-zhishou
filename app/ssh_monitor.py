@@ -10,6 +10,7 @@ from time import perf_counter
 from typing import Any
 
 import paramiko
+from paramiko.ssh_exception import NoValidConnectionsError
 
 from .repository import Repository
 from .security import CredentialCipher
@@ -48,7 +49,21 @@ class SSHMonitorService:
             async with semaphore:
                 return await asyncio.to_thread(self._build_health_summary, server)
 
-        return await asyncio.gather(*(inspect(server) for server in valid_servers))
+        rows = await asyncio.gather(*(inspect(server) for server in valid_servers))
+        for row in rows:
+            try:
+                self.repository.add_server_history(row)
+            except Exception as exc:  # noqa: BLE001
+                self.repository.add_activity_log(
+                    category="ssh_probe",
+                    source="history",
+                    event="Record server history failed",
+                    level="error",
+                    request={"server_id": row.get("server_id")},
+                    response={"error": str(exc)},
+                    success=False,
+                )
+        return rows
 
     async def run_custom_check_by_name(self, server_name: str, check_name: str) -> dict[str, Any]:
         server = self.repository.get_server_by_name(server_name)
@@ -63,6 +78,10 @@ class SSHMonitorService:
             )
         if len(commands) == 1:
             return await asyncio.to_thread(self._run_custom_check, server, commands[0])
+
+        fuzzy_command = self._find_fuzzy_monitor_command(server["id"], check_name)
+        if fuzzy_command:
+            return await asyncio.to_thread(self._run_custom_check, server, fuzzy_command)
 
         legacy_check = self.repository.get_custom_check_by_name(server["id"], check_name)
         if not legacy_check:
@@ -86,6 +105,21 @@ class SSHMonitorService:
         if not command:
             raise ValueError("Command not found or not available for this server")
         return await asyncio.to_thread(self._run_custom_check, server, command)
+
+    def _find_fuzzy_monitor_command(self, server_id: int, check_name: str) -> dict[str, Any] | None:
+        normalized = check_name.strip().lower()
+        if not normalized:
+            return None
+        candidates: list[dict[str, Any]] = []
+        for command in self.repository.list_monitor_commands():
+            if not any(server["id"] == server_id for server in command.get("applicable_servers", [])):
+                continue
+            command_name = command["name"].strip().lower()
+            if normalized in command_name or command_name in normalized:
+                candidates.append(command)
+        if len(candidates) == 1:
+            return candidates[0]
+        return None
 
     def _build_snapshot(self, server: dict[str, Any]) -> dict[str, Any]:
         with self._connect(server) as client:
@@ -140,7 +174,7 @@ class SSHMonitorService:
             client, latency_ms = self._connect_with_latency(server)
         except Exception as exc:  # noqa: BLE001
             issue_code, issue_message, auth_status, status = self._classify_connection_error(exc)
-            return {
+            return self._enrich_status_duration({
                 "server_id": server["id"],
                 "server_name": server["name"],
                 "host": server["host"],
@@ -155,7 +189,7 @@ class SSHMonitorService:
                 "network_status": "unknown",
                 "issue_code": issue_code,
                 "issue_message": issue_message,
-            }
+            })
 
         with client:
             disk = self._get_disk_stats(client)
@@ -179,7 +213,7 @@ class SSHMonitorService:
             issue_code = "network_degraded"
             issue_message = "Network reachability is degraded"
 
-        return {
+        return self._enrich_status_duration({
             "server_id": server["id"],
             "server_name": server["name"],
             "host": server["host"],
@@ -194,7 +228,78 @@ class SSHMonitorService:
             "network_status": network["status"],
             "issue_code": issue_code,
             "issue_message": issue_message,
-        }
+        })
+
+    def _enrich_status_duration(self, row: dict[str, Any]) -> dict[str, Any]:
+        status = str(row.get("status") or "")
+        if status not in {"offline", "error", "warning"}:
+            return row
+        since = self.repository.get_status_since(
+            server_id=int(row["server_id"]),
+            status=status,
+        )
+        if not since:
+            return row
+        row[f"{status}_since"] = since
+        row[f"{status}_duration_seconds"] = self._duration_seconds(since, row.get("checked_at"))
+        if status == "offline":
+            row["issue_message"] = self._append_duration_message(
+                row.get("issue_message") or "Server is offline",
+                "离线始于",
+                since,
+                row.get("offline_duration_seconds"),
+            )
+        return row
+
+    def _duration_seconds(self, since: str, until: str | None) -> int | None:
+        try:
+            start = datetime.fromisoformat(since)
+            end = datetime.fromisoformat(until) if until else datetime.now(timezone.utc)
+            return max(0, round((end - start).total_seconds()))
+        except (TypeError, ValueError):
+            return None
+
+    def _append_duration_message(
+        self,
+        message: str,
+        label: str,
+        since: str,
+        duration_seconds: int | None,
+    ) -> str:
+        duration_text = self._format_duration(duration_seconds)
+        detail = f"{label} {self._format_datetime_cn(since)}"
+        if duration_text:
+            detail = f"{detail}，已持续 {duration_text}"
+        if detail in message:
+            return message
+        return f"{message}（{detail}）"
+
+    def _format_datetime_cn(self, value: str) -> str:
+        try:
+            dt = datetime.fromisoformat(value)
+            local_dt = dt.astimezone()
+        except (TypeError, ValueError):
+            return str(value)
+        weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+        weekday = weekdays[local_dt.weekday()]
+        return (
+            f"{local_dt.year}年{local_dt.month}月{local_dt.day}日{weekday} "
+            f"{local_dt.hour:02d}点{local_dt.minute:02d}分{local_dt.second:02d}秒"
+        )
+
+    def _format_duration(self, seconds: int | None) -> str:
+        if seconds is None:
+            return ""
+        if seconds < 60:
+            return f"{seconds} 秒"
+        minutes = seconds // 60
+        if minutes < 60:
+            return f"{minutes} 分钟"
+        hours = minutes // 60
+        if hours < 24:
+            return f"{hours} 小时 {minutes % 60} 分钟"
+        days = hours // 24
+        return f"{days} 天 {hours % 24} 小时"
 
     def _run_custom_check(self, server: dict[str, Any], check: dict[str, Any]) -> dict[str, Any]:
         with self._connect(server) as client:
@@ -490,7 +595,7 @@ class SSHMonitorService:
             return ("auth_failed", "SSH authentication failed", "auth_failed", "error")
         if isinstance(error, socket.timeout):
             return ("timeout", "Connection timed out", "unknown", "offline")
-        if isinstance(error, paramiko.NoValidConnectionsError):
+        if isinstance(error, NoValidConnectionsError):
             return ("unreachable", "Cannot reach the SSH port", "unknown", "offline")
         if isinstance(error, OSError):
             return ("unreachable", f"Network connection failed: {error}", "unknown", "offline")
