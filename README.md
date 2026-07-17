@@ -1,4 +1,5 @@
-# McpEye 智守
+<img width="1893" height="952" alt="image" src="https://github.com/user-attachments/assets/9fc25e9f-5dba-4680-9b2a-4ec1109aa4ea" /># McpEye 智守
+<img width="1880" height="952" alt="image" src="https://github.com/user-attachments/assets/b9ba9939-71c6-48a1-b3ec-0e2ed26db774" />
 
 McpEye 智守 是一个面向 Linux 服务器巡检场景的 MCP 管理系统，提供网页后台、SSH 巡检能力和机器人可调用的 MCP 接口。
 
@@ -101,3 +102,6 @@ McpEye 智守 适合以下场景：
 
 - 项目名称：McpEye 智守
 - 项目主页：[github.com/Call123X](https://github.com/Call123X)
+<img width="1893" height="952" alt="image" src="https://github.com/user-attachments/assets/460df840-1eeb-4eb7-a36e-3688284130f7" />
+<img width="1882" height="959" alt="image" src="https://github.com/user-attachments/assets/0b8c9c0f-f5bd-46b1-b6b2-2e6f3f8dbebd" />
+<img width="1867" height="952" alt="image" src="https://github.com/user-attachments/assets/868714b8-7e05-41c2-8385-8b1cbfcf2edc" />
